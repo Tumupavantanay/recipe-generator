@@ -1,0 +1,185 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Recipe Generator</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- Fonts: Inter (UI) + Playfair Display (elegant title) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Playfair+Display:wght@600;700&display=swap" rel="stylesheet">
+
+    <style>
+      :root{
+        --bg:#f7f7f8;
+        --card:#ffffff;
+        --ink:#0f172a;           /* slate-900 */
+        --sub:#475569;           /* slate-600 */
+        --brand:#f97316;         /* orange-500 */
+        --ring:rgba(15,23,42,.06);
+      }
+      body{ font-family: Inter, ui-sans-serif, system-ui; background: var(--bg); }
+
+      /* soft grid background */
+      .grid-bg{
+        background-image: radial-gradient(rgba(15,23,42,.06) 1px, transparent 1px);
+        background-size: 22px 22px;
+      }
+
+      /* card entrance */
+      @keyframes popIn { from{opacity:0; transform:translateY(8px) scale(.98)} to{opacity:1; transform:none} }
+      .animate-popIn{ animation: popIn .45s ease-out both; }
+
+      /* minimal spinner */
+      @keyframes spin { to{ transform: rotate(360deg) } }
+      .spinner{ width:16px; height:16px; border:2px solid #e2e8f0; border-top-color: var(--brand); border-radius: 9999px; animation: spin .8s linear infinite; }
+
+      /* title font */
+      .title{ font-family: "Playfair Display", serif; letter-spacing:.2px }
+    </style>
+  </head>
+
+  <body class="min-h-screen grid place-items-center grid-bg p-6">
+    <main class="w-full max-w-2xl bg-[var(--card)] shadow-[0_10px_30px_-12px_rgba(2,6,23,.2)] rounded-3xl border border-[var(--ring)] animate-popIn">
+      <!-- Header -->
+      <header class="px-8 pt-8 pb-3">
+        <div class="inline-flex items-center gap-2 text-xs font-semibold tracking-wide text-[var(--brand)]/90 bg-[var(--brand)]/10 px-2.5 py-1 rounded-full">
+          <span>🍳 Recipe Generator</span>
+        </div>
+        <h1 class="title text-4xl md:text-5xl text-[var(--ink)] mt-3">Cook something great</h1>
+        <p class="text-[var(--sub)] mt-2">Type ingredients (comma separated). We’ll craft a neat, printable recipe.</p>
+      </header>
+
+      <!-- Body -->
+      <section class="px-8 pb-8">
+        <label for="ingredients" class="sr-only">Ingredients</label>
+        <textarea id="ingredients"
+          class="w-full mt-3 p-4 bg-white border border-slate-200 focus:border-[var(--brand)] focus:ring-4 focus:ring-[var(--brand)]/15 rounded-2xl h-28 placeholder:text-slate-400"
+          placeholder="e.g., tomato, egg, onion"></textarea>
+
+        <div class="flex flex-wrap items-center gap-3 mt-4">
+          <button id="generate"
+            class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--brand)] text-white font-medium shadow hover:brightness-95 active:translate-y-px transition disabled:opacity-60 disabled:cursor-not-allowed">
+            <span class="spinner hidden" id="spin"></span>
+            <span id="btnText">Generate</span>
+          </button>
+
+          <button id="clear"
+            class="px-4 py-2 rounded-xl border border-slate-200 bg-white text-slate-700 hover:bg-slate-50">
+            Clear
+          </button>
+
+          <div id="status" class="text-sm hidden"></div>
+        </div>
+
+        <!-- Output card -->
+        <div id="output" class="mt-6 hidden border border-slate-200 rounded-2xl overflow-hidden">
+          <div class="px-6 py-4 bg-gradient-to-r from-amber-50 to-orange-50 border-b border-amber-100">
+            <h2 class="title text-3xl text-[var(--ink)]">Your Recipe</h2>
+          </div>
+          <div class="p-6">
+            <pre id="recipeText" class="whitespace-pre-wrap text-[15.5px] leading-7 text-slate-800"></pre>
+            <div class="mt-4 flex gap-2">
+              <button id="copyBtn"
+                class="px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">
+                Copy
+              </button>
+              <button id="downloadBtn"
+                class="px-3 py-2 text-sm rounded-lg border border-slate-200 hover:bg-slate-50">
+                Download .txt
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <p class="mt-5 text-xs text-slate-500">
+          Backend must be running at <code class="px-1 bg-slate-100 rounded">http://127.0.0.1:5000</code>.
+          Using OpenRouter free models.
+        </p>
+      </section>
+    </main>
+
+    <script>
+      const genBtn = document.getElementById("generate");
+      const clearBtn = document.getElementById("clear");
+      const output = document.getElementById("output");
+      const recipeText = document.getElementById("recipeText");
+      const statusBox = document.getElementById("status");
+      const spin = document.getElementById("spin");
+      const btnText = document.getElementById("btnText");
+      const copyBtn = document.getElementById("copyBtn");
+      const downloadBtn = document.getElementById("downloadBtn");
+
+      const base = window.location.origin; const healthURL = `${base}/health`; const apiURL = `${base}/generate_recipe`;
+
+      function banner(msg, ok=false){
+        statusBox.className = "text-sm mt-1 " + (ok
+          ? "text-green-800 bg-green-100/70 px-2 py-1 rounded"
+          : "text-red-800 bg-red-100/70 px-2 py-1 rounded");
+        statusBox.textContent = (ok ? "🟢 " : "⚠️ ") + msg;
+        statusBox.classList.remove("hidden");
+      }
+      function hideBanner(){ statusBox.classList.add("hidden"); }
+
+      function setLoading(on){
+        if (on){ spin.classList.remove("hidden"); btnText.textContent = "Mixing…"; genBtn.disabled = true; }
+        else   { spin.classList.add("hidden");    btnText.textContent = "Generate"; genBtn.disabled = false; }
+      }
+
+      genBtn.addEventListener("click", async () => {
+        const ingredients = document.getElementById("ingredients").value.trim();
+        if (!ingredients) return banner("Enter some ingredients first.");
+
+        setLoading(true); hideBanner();
+
+        try{
+          const ping = await fetch(healthURL).catch(()=>null);
+          if (!ping || ping.status >= 400) throw new Error("Backend not reachable. Is Flask running?");
+
+          const res = await fetch(apiURL, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ingredients }),
+          });
+
+          let data; try{ data = await res.json(); }catch{}
+          if (!res.ok){
+            if (res.status === 429) throw new Error(data?.message || "Rate limited. Please retry shortly.");
+            throw new Error(data?.message || "Backend error.");
+          }
+          if (data.error) throw new Error(data.error);
+
+          recipeText.textContent = data.recipe;
+          output.classList.remove("hidden");
+          banner("Connected. Bon appétit!", true);
+        }catch(err){
+          console.error(err); banner(err.message || "Something went wrong.");
+        }finally{
+          setLoading(false);
+        }
+      });
+
+      clearBtn.addEventListener("click", () => {
+        document.getElementById("ingredients").value = "";
+        output.classList.add("hidden");
+        recipeText.textContent = "";
+        hideBanner();
+      });
+
+      copyBtn?.addEventListener("click", async () => {
+        try{ await navigator.clipboard.writeText(recipeText.textContent); banner("Copied to clipboard.", true); }
+        catch{ banner("Copy failed."); }
+      });
+
+      downloadBtn?.addEventListener("click", () => {
+        const blob = new Blob([recipeText.textContent], {type:"text/plain"});
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = "recipe.txt"; a.click();
+        URL.revokeObjectURL(url);
+      });
+    </script>
+  </body>
+</html>
