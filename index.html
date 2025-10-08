@@ -32,9 +32,20 @@
       @keyframes popIn { from{opacity:0; transform:translateY(8px) scale(.98)} to{opacity:1; transform:none} }
       .animate-popIn{ animation: popIn .45s ease-out both; }
 
-      /* minimal spinner */
+      /* spinner (fallback) */
       @keyframes spin { to{ transform: rotate(360deg) } }
-      .spinner{ width:16px; height:16px; border:2px solid #e2e8f0; border-top-color: var(--brand); border-radius: 9999px; animation: spin .8s linear infinite; }
+      .spinner{ width:16px; height:16px; border:2px solid #e2e8f0; border-top-color: var(--brand); border-radius:9999px; animation: spin .8s linear infinite; }
+
+      /* whisk mixing animation */
+      .whisk {
+        width: 18px; height: 18px; display: inline-block; position: relative;
+      }
+      .whisk:before, .whisk:after {
+        content:""; position:absolute; inset:0; border-radius:50%;
+        border:2px solid transparent; border-top-color: var(--brand);
+        animation: spin .7s linear infinite;
+      }
+      .whisk:after { inset:3px; animation-duration: .5s; }
 
       /* title font */
       .title{ font-family: "Playfair Display", serif; letter-spacing:.2px }
@@ -62,6 +73,7 @@
         <div class="flex flex-wrap items-center gap-3 mt-4">
           <button id="generate"
             class="inline-flex items-center gap-2 px-5 py-2.5 rounded-xl bg-[var(--brand)] text-white font-medium shadow hover:brightness-95 active:translate-y-px transition disabled:opacity-60 disabled:cursor-not-allowed">
+            <span class="whisk hidden" id="whisk"></span>
             <span class="spinner hidden" id="spin"></span>
             <span id="btnText">Generate</span>
           </button>
@@ -94,10 +106,7 @@
           </div>
         </div>
 
-        <p class="mt-5 text-xs text-slate-500">
-          Backend must be running at <code class="px-1 bg-slate-100 rounded">http://127.0.0.1:5000</code>.
-          Using OpenRouter free models.
-        </p>
+        <p id="envNote" class="mt-5 text-xs text-slate-500"></p>
       </section>
     </main>
 
@@ -108,12 +117,25 @@
       const recipeText = document.getElementById("recipeText");
       const statusBox = document.getElementById("status");
       const spin = document.getElementById("spin");
+      const whisk = document.getElementById("whisk");
       const btnText = document.getElementById("btnText");
       const copyBtn = document.getElementById("copyBtn");
       const downloadBtn = document.getElementById("downloadBtn");
+      const envNote = document.getElementById("envNote");
 
-      const base = window.location.origin; const healthURL = `${base}/health`; const apiURL = `${base}/generate_recipe`;
+      // -------- ENV DETECTION: local (file:// or localhost) vs deployed ----------
+      const isLocalHost = ["localhost", "127.0.0.1"].includes(location.hostname);
+      const isFile = location.protocol === "file:";
+      const base = (isLocalHost || isFile) ? "http://127.0.0.1:5000" : window.location.origin;
 
+      const healthURL = `${base}/health`;
+      const apiURL    = `${base}/generate_recipe`;
+
+      envNote.innerHTML = (isLocalHost || isFile)
+        ? `Local mode: backend expected at <code class="px-1 bg-slate-100 rounded">http://127.0.0.1:5000</code>.`
+        : `Cloud mode: using same-origin API at <code class="px-1 bg-slate-100 rounded">${new URL(base).origin}</code>.`;
+
+      // ------------------ UI helpers ------------------
       function banner(msg, ok=false){
         statusBox.className = "text-sm mt-1 " + (ok
           ? "text-green-800 bg-green-100/70 px-2 py-1 rounded"
@@ -124,10 +146,20 @@
       function hideBanner(){ statusBox.classList.add("hidden"); }
 
       function setLoading(on){
-        if (on){ spin.classList.remove("hidden"); btnText.textContent = "Mixing…"; genBtn.disabled = true; }
-        else   { spin.classList.add("hidden");    btnText.textContent = "Generate"; genBtn.disabled = false; }
+        if (on){
+          whisk.classList.remove("hidden"); // cute mixing
+          spin.classList.add("hidden");     // spinner fallback stays hidden
+          btnText.textContent = "Mixing…";
+          genBtn.disabled = true;
+        } else {
+          whisk.classList.add("hidden");
+          spin.classList.add("hidden");
+          btnText.textContent = "Generate";
+          genBtn.disabled = false;
+        }
       }
 
+      // ------------------ Actions ------------------
       genBtn.addEventListener("click", async () => {
         const ingredients = document.getElementById("ingredients").value.trim();
         if (!ingredients) return banner("Enter some ingredients first.");
@@ -135,8 +167,13 @@
         setLoading(true); hideBanner();
 
         try{
+          // Quick reachability ping
           const ping = await fetch(healthURL).catch(()=>null);
-          if (!ping || ping.status >= 400) throw new Error("Backend not reachable. Is Flask running?");
+          if (!ping || ping.status >= 400) {
+            throw new Error((isLocalHost || isFile)
+              ? "Backend not reachable. Start Flask locally: python app.py"
+              : "Backend not reachable on server. Check Vercel logs & env.");
+          }
 
           const res = await fetch(apiURL, {
             method: "POST",
@@ -151,7 +188,7 @@
           }
           if (data.error) throw new Error(data.error);
 
-          recipeText.textContent = data.recipe;
+          recipeText.textContent = data.recipe || "";
           output.classList.remove("hidden");
           banner("Connected. Bon appétit!", true);
         }catch(err){
